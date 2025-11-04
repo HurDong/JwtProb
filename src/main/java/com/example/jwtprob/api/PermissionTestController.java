@@ -1,6 +1,7 @@
 package com.example.jwtprob.api;
 
 import com.example.jwtprob.api.dto.ApiResponse;
+import com.example.jwtprob.audit.Audited;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -16,6 +17,7 @@ public class PermissionTestController {
     
     @GetMapping("/users")
     @PreAuthorize("hasPermission('USER', 'READ')")
+    @Audited(action = "USER_LIST", resource = "User")
     public ResponseEntity<?> getUsers(Authentication auth) {
         return ResponseEntity.ok(ApiResponse.success(
             "사용자 목록 조회 성공",
@@ -25,6 +27,7 @@ public class PermissionTestController {
 
     @PostMapping("/users")
     @PreAuthorize("hasPermission('USER', 'WRITE')")
+    @Audited(action = "USER_CREATE", resource = "User")
     public ResponseEntity<?> createUser(@RequestBody Map<String, String> body, Authentication auth) {
         return ResponseEntity.ok(ApiResponse.success(
             "사용자 생성 성공",
@@ -34,6 +37,7 @@ public class PermissionTestController {
 
     @DeleteMapping("/users/{id}")
     @PreAuthorize("hasPermission('USER', 'DELETE')")
+    @Audited(action = "USER_DELETE", resource = "User")
     public ResponseEntity<?> deleteUser(@PathVariable Long id, Authentication auth) {
         return ResponseEntity.ok(ApiResponse.success(
             "사용자 삭제 성공",
@@ -83,6 +87,7 @@ public class PermissionTestController {
 
     @PostMapping("/orders/{id}/approve")
     @PreAuthorize("hasPermission('ORDER', 'APPROVE')")
+    @Audited(action = "ORDER_APPROVE", resource = "Order")
     public ResponseEntity<?> approveOrder(@PathVariable Long id, Authentication auth) {
         return ResponseEntity.ok(ApiResponse.success(
             "주문 승인 완료",

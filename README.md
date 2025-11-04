@@ -10,6 +10,7 @@ Spring Boot 3 기반 JWT 인증 및 6단계 역할 계층 시스템
 - **Permission 기반 권한 관리** (Resource + Action 조합)
 - **Spring Security RoleHierarchy** 기반 자동 권한 상속
 - **메서드 레벨 보안** (`@PreAuthorize` + `hasPermission`)
+- **AOP 기반 Audit 로깅** (누가 언제 무엇을 실행했는지 자동 추적)
 - **Swagger UI** (API 문서 자동화)
 - **블랙리스트 로그아웃** (서버 측 토큰 무효화)
 
@@ -131,6 +132,34 @@ POST   /api/v2/reports/export        # @PreAuthorize("hasPermission('REPORT', 'E
 GET    /api/v2/my-permissions        # 내 권한 목록 조회
 
 # 모든 API 공통 헤더
+Authorization: Bearer <JWT_TOKEN>
+```
+
+### Audit Log 조회 API (관리자 전용)
+
+```bash
+# 모든 감사 로그 조회
+GET /api/admin/audit-logs?page=0&size=20
+
+# 최근 100개 로그
+GET /api/admin/audit-logs/recent
+
+# 특정 사용자 로그
+GET /api/admin/audit-logs/user/{username}
+
+# 실패한 로그만
+GET /api/admin/audit-logs/failures
+
+# 액션 검색
+GET /api/admin/audit-logs/search?action=USER_DELETE
+
+# 기간별 조회
+GET /api/admin/audit-logs/range?startDate=2025-01-01T00:00:00&endDate=2025-12-31T23:59:59
+
+# 통계
+GET /api/admin/audit-logs/stats
+
+# 권한: ROLE_ADMIN 또는 ROLE_SUPER_ADMIN
 Authorization: Bearer <JWT_TOKEN>
 ```
 
@@ -294,6 +323,47 @@ public void deleteUser() { }
 // superadmin2: 모든 권한 보유 → 200 OK
 ```
 
+## 🔍 AOP 기반 Audit 로깅 시스템
+
+### 개념
+- **AOP (Aspect-Oriented Programming)**: 횡단 관심사를 분리하여 코드 중복 제거
+- **Audit**: 누가(Who), 언제(When), 무엇을(What), 어디서(Where) 실행했는지 기록
+
+### 구조
+```
+@Audited 어노테이션 → AuditAspect (AOP) → DB 자동 저장
+```
+
+### 사용 예시
+```java
+@Audited(action = "USER_DELETE", resource = "User")
+public void deleteUser(Long id) { }
+
+// 실행 시 자동으로 AuditLog 생성:
+// - username: "admin"
+// - action: "USER_DELETE"
+// - httpMethod: "DELETE"
+// - requestUri: "/api/v2/users/123"
+// - ipAddress: "192.168.0.1"
+// - result: "SUCCESS"
+// - durationMs: 45
+```
+
+### 기록 내용
+- **누가**: 현재 인증된 사용자명
+- **무엇을**: 실행한 액션 (USER_DELETE, ORDER_APPROVE 등)
+- **언제**: 실행 시각 (LocalDateTime)
+- **어디서**: 클라이언트 IP 주소
+- **얼마나**: 실행 시간 (밀리초)
+- **결과**: SUCCESS / FAILURE / UNAUTHORIZED
+
+### 관리자 기능
+- 모든 감사 로그 조회 (페이징)
+- 특정 사용자 활동 추적
+- 실패한 작업만 필터링
+- 액션 검색 및 기간별 조회
+- 통계 (성공률, 총 실행 횟수)
+
 ## 📝 학습 포인트
 
 1. **JWT 인증 흐름**: 로그인 → JWT 발급 → 요청마다 검증
@@ -302,9 +372,11 @@ public void deleteUser() { }
 4. **Permission-Based Access Control**: Resource + Action 조합으로 세밀한 권한 제어 (v2)
 5. **@PreAuthorize**: 메서드 레벨 보안 (`hasRole` + `hasPermission`)
 6. **PermissionEvaluator**: 커스텀 권한 검증 로직
-7. **Stateless 아키텍처**: 세션 없이 JWT로 인증 유지 (부분적 Stateful: Refresh Token)
-8. **BCrypt**: 비밀번호 단방향 암호화
-9. **Token Blacklist**: 서버 측 토큰 무효화로 강제 로그아웃 구현
+7. **AOP (Aspect-Oriented Programming)**: `@Around` 어드바이스로 메서드 실행 전후 처리
+8. **Audit Logging**: 보안 감사 및 규정 준수 (Compliance)
+9. **Stateless 아키텍처**: 세션 없이 JWT로 인증 유지 (부분적 Stateful: Refresh Token)
+10. **BCrypt**: 비밀번호 단방향 암호화
+11. **Token Blacklist**: 서버 측 토큰 무효화로 강제 로그아웃 구현
 
 ## 🔗 참고 링크
 

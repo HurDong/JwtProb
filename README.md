@@ -51,7 +51,20 @@ POST /login
   "username": "admin",
   "password": "admin"
 }
-# Response: { "token": "eyJhbG..." }
+# Response: 
+# {
+#   "accessToken": "eyJhbG...",
+#   "refreshToken": "550e8400-e29b-41d4-a716-446655440000",
+#   "tokenType": "Bearer",
+#   "expiresIn": 900
+# }
+
+# Access Token 재발급
+POST /refresh
+{
+  "refreshToken": "550e8400-e29b-41d4-a716-446655440000"
+}
+# Response: { "accessToken": "eyJhbG...", "expiresIn": 900 }
 
 # 일반 로그아웃 (클라이언트 방식)
 POST /logout
@@ -178,27 +191,46 @@ curl -H "Authorization: Bearer $TOKEN" \
   http://localhost:8080/api/admin/panel   # ❌ 403 (상위 권한)
 ```
 
+## 🔄 Refresh Token 패턴
+
+| 토큰              | 만료 시간 | 저장 위치 | 용도                          |
+| ----------------- | --------- | --------- | ----------------------------- |
+| **Access Token**  | 15분      | 클라이언트 | API 요청 인증                 |
+| **Refresh Token** | 7일       | DB        | Access Token 재발급           |
+
+**흐름:**
+1. 로그인 → Access Token (15분) + Refresh Token (7일) 발급
+2. API 요청 → Access Token 사용
+3. Access Token 만료 → `/refresh`로 재발급 (Refresh Token 제출)
+4. 로그아웃 → Refresh Token DB에서 삭제 → 재발급 불가
+
+**장점:**
+- Access Token 탈취되어도 15분만 유효
+- Refresh Token은 DB 저장 → 강제 무효화 가능
+- 로그아웃 시 Refresh Token 삭제 → 완전한 로그아웃
+
 ## 🔓 로그아웃 방식 비교
 
-| 특징           | 일반 로그아웃 (`/logout`)         | 블랙리스트 로그아웃 (`/logout/blacklist`)      |
-| ------------ | ---------------------------- | ------------------------------------ |
-| **서버 처리**    | 성공 응답만 반환                    | 토큰을 DB 블랙리스트에 추가                     |
-| **토큰 유효성**   | 만료 전까지 여전히 유효               | 즉시 무효화                               |
-| **보안성**      | 낮음 (토큰 복사 시 재사용 가능)         | 높음 (재사용 불가)                          |
-| **성능**       | 빠름 (DB 조회 없음)                | 약간 느림 (매 요청마다 블랙리스트 확인)              |
-| **사용 케이스**   | 일반 웹사이트                      | 금융/관리자 시스템                           |
-| **자동 정리**    | -                            | 매일 새벽 2시 만료된 토큰 자동 삭제 (스케줄러)         |
+| 특징              | 일반 로그아웃 (`/logout`)       | 블랙리스트 로그아웃 (`/logout/blacklist`)      |
+| ----------------- | ------------------------------- | ---------------------------------------------- |
+| **서버 처리**     | Refresh Token 삭제              | Access Token 블랙리스트 + Refresh Token 삭제   |
+| **Access Token**  | 만료 전까지 유효 (15분)         | 즉시 무효화                                    |
+| **Refresh Token** | 삭제됨 (재발급 불가)            | 삭제됨 (재발급 불가)                           |
+| **보안성**        | 중간 (최대 15분 위험)           | 높음 (즉시 차단)                               |
+| **성능**          | 빠름                            | 약간 느림 (블랙리스트 확인)                    |
+| **사용 케이스**   | 일반 웹사이트                   | 금융/관리자 시스템                             |
 
-**권장:** 일반 서비스는 `/logout`, 보안 중요 시 `/logout/blacklist` 사용
+**권장:** 일반 서비스는 `/logout` (Refresh Token 패턴으로 충분), 보안 중요 시 `/logout/blacklist` 사용
 
 ## 📝 학습 포인트
 
 1. **JWT 인증 흐름**: 로그인 → JWT 발급 → 요청마다 검증
-2. **RoleHierarchy**: 상속 구조로 권한 관리 간소화
-3. **@PreAuthorize**: 메서드 레벨 세밀한 권한 제어
-4. **Stateless 아키텍처**: 세션 없이 JWT로 인증 유지
-5. **BCrypt**: 비밀번호 단방향 암호화
-6. **Token Blacklist**: 서버 측 토큰 무효화로 강제 로그아웃 구현
+2. **Refresh Token 패턴**: Access Token (15분) + Refresh Token (7일)으로 보안 강화
+3. **RoleHierarchy**: 상속 구조로 권한 관리 간소화
+4. **@PreAuthorize**: 메서드 레벨 세밀한 권한 제어
+5. **Stateless 아키텍처**: 세션 없이 JWT로 인증 유지 (부분적 Stateful: Refresh Token)
+6. **BCrypt**: 비밀번호 단방향 암호화
+7. **Token Blacklist**: 서버 측 토큰 무효화로 강제 로그아웃 구현
 
 ## 🔗 참고 링크
 

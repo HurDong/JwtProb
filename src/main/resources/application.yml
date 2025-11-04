@@ -22,7 +22,7 @@ spring:
 app:
   jwt:
     secret: "change-this-to-a-long-random-secret-key-please-keep-it-safe-1234567890"
-    expiration-ms: 3600000 # 1 hour
+    expiration-ms: 900000 # 15 minutes (Refresh Token 사용)
 
 springdoc:
   swagger-ui:

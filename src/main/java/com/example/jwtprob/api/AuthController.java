@@ -5,9 +5,11 @@ import com.example.jwtprob.api.dto.LoginRequest;
 import com.example.jwtprob.api.dto.SignupRequest;
 import com.example.jwtprob.security.BlacklistService;
 import com.example.jwtprob.security.JwtTokenProvider;
+import com.example.jwtprob.security.RefreshTokenService;
 import com.example.jwtprob.user.Role;
 import com.example.jwtprob.user.UserAccount;
 import com.example.jwtprob.user.UserRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,17 +35,20 @@ public class AuthController {
     private final AuthenticationManager authenticationManager;
     private final JwtTokenProvider jwtTokenProvider;
     private final BlacklistService blacklistService;
+    private final RefreshTokenService refreshTokenService;
 
     public AuthController(UserRepository userRepository,
             PasswordEncoder passwordEncoder,
             AuthenticationManager authenticationManager,
             JwtTokenProvider jwtTokenProvider,
-            BlacklistService blacklistService) {
+            BlacklistService blacklistService,
+            RefreshTokenService refreshTokenService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.authenticationManager = authenticationManager;
         this.jwtTokenProvider = jwtTokenProvider;
         this.blacklistService = blacklistService;
+        this.refreshTokenService = refreshTokenService;
     }
 
     @PostMapping("/signup/guest")
@@ -77,7 +82,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
         log.info("=== 로그인 시도: username={}", request.getUsername());
 
         try {
@@ -88,13 +93,68 @@ public class AuthController {
             UserAccount principal = (UserAccount) authentication.getPrincipal();
             log.info("=== 사용자 권한: username={}, roles={}", principal.getUsername(), principal.getRoles());
 
-            String token = jwtTokenProvider.generateToken(principal.getUsername(), principal.getRoles());
-            log.info("=== JWT 토큰 생성 완료: username={}, token length={}", principal.getUsername(), token.length());
+            // Access Token 생성 (15분)
+            String accessToken = jwtTokenProvider.generateToken(principal.getUsername(), principal.getRoles());
+            log.info("=== Access Token 생성 완료: username={}, token length={}", principal.getUsername(), accessToken.length());
 
-            return ResponseEntity.ok(new AuthResponse(token));
+            // Refresh Token 생성 (7일)
+            String deviceInfo = httpRequest.getHeader("User-Agent");
+            String refreshToken = refreshTokenService.createRefreshToken(principal.getUsername(), deviceInfo);
+            log.info("=== Refresh Token 생성 완료: username={}", principal.getUsername());
+
+            return ResponseEntity.ok(Map.of(
+                "accessToken", accessToken,
+                "refreshToken", refreshToken,
+                "tokenType", "Bearer",
+                "expiresIn", 900 // 15분 (초 단위)
+            ));
         } catch (Exception e) {
             log.error("=== 로그인 실패: username={}, error={}", request.getUsername(), e.getMessage(), e);
             throw e;
+        }
+    }
+
+    /**
+     * Access Token 재발급
+     * Refresh Token을 사용하여 새로운 Access Token 발급
+     */
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refreshToken(@RequestBody Map<String, String> request) {
+        String refreshToken = request.get("refreshToken");
+        
+        if (refreshToken == null || refreshToken.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "message", "Refresh Token이 필요합니다"
+            ));
+        }
+
+        try {
+            // Refresh Token 검증
+            com.example.jwtprob.security.RefreshToken tokenEntity = refreshTokenService.findByToken(refreshToken)
+                .orElseThrow(() -> new RuntimeException("유효하지 않은 Refresh Token입니다"));
+            
+            refreshTokenService.verifyExpiration(tokenEntity);
+            
+            // 사용자 정보 조회
+            UserAccount user = userRepository.findByUsername(tokenEntity.getUsername())
+                .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다"));
+            
+            // 새로운 Access Token 발급
+            String newAccessToken = jwtTokenProvider.generateToken(user.getUsername(), user.getRoles());
+            log.info("=== Access Token 재발급 완료: username={}", user.getUsername());
+            
+            return ResponseEntity.ok(Map.of(
+                "accessToken", newAccessToken,
+                "tokenType", "Bearer",
+                "expiresIn", 900 // 15분
+            ));
+        } catch (Exception e) {
+            log.error("=== Token 재발급 실패: error={}", e.getMessage(), e);
+            return ResponseEntity.status(401).body(Map.of(
+                "success", false,
+                "message", e.getMessage()
+            ));
         }
     }
 
@@ -105,18 +165,30 @@ public class AuthController {
      * - 토큰은 만료 전까지 여전히 유효함 (보안 취약)
      */
     @PostMapping("/logout")
-    public ResponseEntity<?> logout(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+    public ResponseEntity<?> logout(@RequestHeader(value = "Authorization", required = false) String authHeader,
+                                     @RequestBody(required = false) Map<String, String> body) {
+        String username = null;
+        
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String token = authHeader.substring(7);
-            String username = jwtTokenProvider.getUsername(token);
-            log.info("=== 일반 로그아웃: username={}, 클라이언트에서 토큰 삭제 필요", username);
-        } else {
-            log.info("=== 일반 로그아웃: 토큰 없음");
+            username = jwtTokenProvider.getUsername(token);
+            log.info("=== 일반 로그아웃: username={}", username);
+        }
+        
+        // Refresh Token도 삭제 (있으면)
+        if (body != null && body.containsKey("refreshToken")) {
+            String refreshToken = body.get("refreshToken");
+            refreshTokenService.deleteByToken(refreshToken);
+            log.info("=== Refresh Token 삭제: username={}", username);
+        } else if (username != null) {
+            // username으로 Refresh Token 삭제
+            refreshTokenService.deleteByUsername(username);
+            log.info("=== Refresh Token 삭제 (username 기반): username={}", username);
         }
         
         return ResponseEntity.ok(Map.of(
             "success", true,
-            "message", "로그아웃 성공 (클라이언트에서 토큰을 삭제하세요)",
+            "message", "로그아웃 성공",
             "type", "CLIENT_LOGOUT"
         ));
     }
@@ -128,7 +200,8 @@ public class AuthController {
      * - 클라이언트도 토큰을 삭제해야 함
      */
     @PostMapping("/logout/blacklist")
-    public ResponseEntity<?> logoutWithBlacklist(@RequestHeader("Authorization") String authHeader) {
+    public ResponseEntity<?> logoutWithBlacklist(@RequestHeader("Authorization") String authHeader,
+                                                  @RequestBody(required = false) Map<String, String> body) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return ResponseEntity.badRequest().body(Map.of(
                 "success", false,
@@ -140,8 +213,19 @@ public class AuthController {
         String username = jwtTokenProvider.getUsername(token);
         
         try {
+            // Access Token 블랙리스트에 추가
             blacklistService.addToBlacklist(token, "LOGOUT");
             log.info("=== 블랙리스트 로그아웃 성공: username={}", username);
+            
+            // Refresh Token도 삭제
+            if (body != null && body.containsKey("refreshToken")) {
+                String refreshToken = body.get("refreshToken");
+                refreshTokenService.deleteByToken(refreshToken);
+                log.info("=== Refresh Token 삭제: username={}", username);
+            } else {
+                refreshTokenService.deleteByUsername(username);
+                log.info("=== Refresh Token 삭제 (username 기반): username={}", username);
+            }
             
             return ResponseEntity.ok(Map.of(
                 "success", true,

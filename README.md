@@ -23,18 +23,19 @@ Spring Boot 3 기반 JWT 인증 및 6단계 역할 계층 시스템
 
 ## 🔐 테스트 계정
 
-| Username | Password | Role | 접근 가능 API |
-|----------|----------|------|--------------|
-| `guest` | `guest` | GUEST | GUEST만 |
-| `user` | `user` | USER | GUEST, USER |
-| `dev` | `dev` | DEV | GUEST, USER, DEV |
-| `manager` | `manager` | MANAGER | GUEST, USER, DEV, MANAGER |
-| `admin` | `admin` | ADMIN | 위 + ADMIN |
-| `superadmin` | `superadmin` | SUPER_ADMIN | 전체 |
+| Username     | Password     | Role        | 접근 가능 API             |
+| ------------ | ------------ | ----------- | ------------------------- |
+| `guest`      | `guest`      | GUEST       | GUEST만                   |
+| `user`       | `user`       | USER        | GUEST, USER               |
+| `dev`        | `dev`        | DEV         | GUEST, USER, DEV          |
+| `manager`    | `manager`    | MANAGER     | GUEST, USER, DEV, MANAGER |
+| `admin`      | `admin`      | ADMIN       | 위 + ADMIN                |
+| `superadmin` | `superadmin` | SUPER_ADMIN | 전체                      |
 
 ## 📡 주요 API
 
 ### 인증
+
 ```bash
 # 회원가입
 POST /signup/guest        # GUEST 권한
@@ -54,6 +55,7 @@ POST /login
 ```
 
 ### 테스트 API (역할별)
+
 ```bash
 GET /api/guest/welcome              # GUEST+
 GET /api/user/dashboard             # USER+
@@ -119,6 +121,7 @@ src/main/java/com/example/jwtprob/
 ## 🔍 핵심 코드
 
 ### RoleHierarchy 설정
+
 ```java
 @Bean
 public RoleHierarchy roleHierarchy() {
@@ -135,6 +138,7 @@ public RoleHierarchy roleHierarchy() {
 ```
 
 ### 메서드 레벨 보안
+
 ```java
 @GetMapping("/api/admin/panel")
 @PreAuthorize("hasRole('ADMIN')")  // ADMIN 이상만 접근 가능
@@ -177,8 +181,3 @@ curl -H "Authorization: Bearer $TOKEN" \
 - [Spring Security RoleHierarchy](https://docs.spring.io/spring-security/reference/servlet/authorization/architecture.html)
 - [JJWT Documentation](https://github.com/jwtk/jjwt)
 - [Swagger UI](http://localhost:8080/swagger-ui.html)
-
-## 📄 License
-
-MIT License
-

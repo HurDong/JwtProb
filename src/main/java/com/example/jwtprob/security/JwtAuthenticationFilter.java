@@ -30,21 +30,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
         String requestURI = request.getRequestURI();
         log.debug("=== JWT 필터 실행: method={}, uri={}", request.getMethod(), requestURI);
-        
+
         String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String token = authHeader.substring(7);
             log.info("=== JWT 토큰 발견: uri={}, token length={}", requestURI, token.length());
-            
+
             if (jwtTokenProvider.validateToken(token)) {
                 String username = jwtTokenProvider.getUsername(token);
                 Set<Role> roles = jwtTokenProvider.getRoles(token);
                 log.info("=== JWT 토큰 검증 성공: username={}, roles={}", username, roles);
-                
-                var authorities = roles.stream().map(r -> new SimpleGrantedAuthority(r.name())).collect(Collectors.toSet());
+
+                var authorities = roles.stream().map(r -> new SimpleGrantedAuthority(r.name()))
+                        .collect(Collectors.toSet());
                 var authentication = new UsernamePasswordAuthenticationToken(username, null, authorities);
                 SecurityContextHolder.getContext().setAuthentication(authentication);
                 log.info("=== SecurityContext에 인증 정보 저장 완료: username={}, authorities={}", username, authorities);
@@ -57,5 +59,3 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 }
-
-

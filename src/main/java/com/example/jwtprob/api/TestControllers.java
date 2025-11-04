@@ -1,5 +1,6 @@
 package com.example.jwtprob.api;
 
+import com.example.jwtprob.audit.Audited;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,6 +13,7 @@ public class TestControllers {
 
     // ============= 공개 API =============
     @GetMapping("/api/public")
+    @Audited(action = "PUBLIC_VIEW", resource = "Public")
     public Map<String, Object> publicEndpoint() {
         return Map.of(
                 "message", "공개 API - 누구나 접근 가능",
@@ -22,6 +24,7 @@ public class TestControllers {
     // ============= GUEST 레벨 (최하위) =============
     @PreAuthorize("hasRole('GUEST')")
     @GetMapping("/api/guest/view")
+    @Audited(action = "GUEST_VIEW", resource = "Guest")
     public Map<String, Object> guestView(Authentication authentication) {
         return Map.of(
                 "message", "게스트 읽기 전용",

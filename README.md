@@ -326,15 +326,18 @@ public void deleteUser() { }
 ## 🔍 AOP 기반 Audit 로깅 시스템
 
 ### 개념
+
 - **AOP (Aspect-Oriented Programming)**: 횡단 관심사를 분리하여 코드 중복 제거
 - **Audit**: 누가(Who), 언제(When), 무엇을(What), 어디서(Where) 실행했는지 기록
 
 ### 구조
+
 ```
 @Audited 어노테이션 → AuditAspect (AOP) → DB 자동 저장
 ```
 
 ### 사용 예시
+
 ```java
 @Audited(action = "USER_DELETE", resource = "User")
 public void deleteUser(Long id) { }
@@ -350,6 +353,7 @@ public void deleteUser(Long id) { }
 ```
 
 ### 기록 내용
+
 - **누가**: 현재 인증된 사용자명
 - **무엇을**: 실행한 액션 (USER_DELETE, ORDER_APPROVE 등)
 - **언제**: 실행 시각 (LocalDateTime)
@@ -358,11 +362,39 @@ public void deleteUser(Long id) { }
 - **결과**: SUCCESS / FAILURE / UNAUTHORIZED
 
 ### 관리자 기능
+
 - 모든 감사 로그 조회 (페이징)
 - 특정 사용자 활동 추적
 - 실패한 작업만 필터링
 - 액션 검색 및 기간별 조회
 - 통계 (성공률, 총 실행 횟수)
+
+### 테스트 방법 (Swagger UI 추천!)
+
+```
+1. http://localhost:8080/swagger-ui.html 접속
+
+2. POST /login 실행
+   → username: superadmin, password: superadmin
+   → accessToken 복사
+
+3. 우측 상단 [Authorize] 클릭
+   → Bearer <TOKEN> 입력
+
+4. GET /api/guest/view 실행 (@Audited 자동 실행!)
+
+5. GET /api/admin/audit-logs/recent 실행
+   → AuditLog 확인: username, action, httpMethod, durationMs 등
+
+성공 시 Response:
+{
+  "username": "superadmin",
+  "action": "GUEST_VIEW",
+  "httpMethod": "GET",
+  "result": "SUCCESS",
+  "durationMs": 15
+}
+```
 
 ## 📝 학습 포인트
 

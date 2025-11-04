@@ -6,7 +6,7 @@ spring:
     url: jdbc:h2:mem:jwtprobdb;MODE=MYSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
     driverClassName: org.h2.Driver
     username: sa
-    password: 
+    password:
   jpa:
     hibernate:
       ddl-auto: update
@@ -37,4 +37,3 @@ logging:
     com.example.jwtprob: INFO
     com.example.jwtprob.api: INFO
     com.example.jwtprob.security: INFO
-

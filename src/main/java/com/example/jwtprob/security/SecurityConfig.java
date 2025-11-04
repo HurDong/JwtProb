@@ -59,9 +59,12 @@ public class SecurityConfig {
     }
 
     @Bean
-    public MethodSecurityExpressionHandler methodSecurityExpressionHandler(RoleHierarchy roleHierarchy) {
+    public MethodSecurityExpressionHandler methodSecurityExpressionHandler(
+            RoleHierarchy roleHierarchy,
+            com.example.jwtprob.permission.CustomPermissionEvaluator permissionEvaluator) {
         DefaultMethodSecurityExpressionHandler expressionHandler = new DefaultMethodSecurityExpressionHandler();
         expressionHandler.setRoleHierarchy(roleHierarchy);
+        expressionHandler.setPermissionEvaluator(permissionEvaluator); // Permission 검증 추가
         return expressionHandler;
     }
 

@@ -5,10 +5,13 @@ Spring Boot 3 기반 JWT 인증 및 6단계 역할 계층 시스템
 ## 🎯 핵심 기능
 
 - **JWT 인증** (HS256, BCrypt 암호화)
+- **Refresh Token 패턴** (Access 15분 + Refresh 7일)
 - **6단계 역할 계층** (GUEST → USER → DEV → MANAGER → ADMIN → SUPER_ADMIN)
+- **Permission 기반 권한 관리** (Resource + Action 조합)
 - **Spring Security RoleHierarchy** 기반 자동 권한 상속
-- **메서드 레벨 보안** (`@PreAuthorize`)
+- **메서드 레벨 보안** (`@PreAuthorize` + `hasPermission`)
 - **Swagger UI** (API 문서 자동화)
+- **블랙리스트 로그아웃** (서버 측 토큰 무효화)
 
 ## 🚀 실행 방법
 
@@ -23,14 +26,27 @@ Spring Boot 3 기반 JWT 인증 및 6단계 역할 계층 시스템
 
 ## 🔐 테스트 계정
 
-| Username     | Password     | Role        | 접근 가능 API             |
-| ------------ | ------------ | ----------- | ------------------------- |
-| `guest`      | `guest`      | GUEST       | GUEST만                   |
-| `user`       | `user`       | USER        | GUEST, USER               |
-| `dev`        | `dev`        | DEV         | GUEST, USER, DEV          |
-| `manager`    | `manager`    | MANAGER     | GUEST, USER, DEV, MANAGER |
-| `admin`      | `admin`      | ADMIN       | 위 + ADMIN                |
-| `superadmin` | `superadmin` | SUPER_ADMIN | 전체                      |
+### 기존 Role 기반 (v1)
+
+| Username     | Password     | Role        | 접근 가능 API                        |
+| ------------ | ------------ | ----------- | ------------------------------------ |
+| `guest`      | `guest`      | GUEST       | GUEST 전용                           |
+| `user`       | `user`       | USER        | GUEST ↓ + USER                       |
+| `dev`        | `dev`        | DEV         | USER ↓ + DEV                         |
+| `manager`    | `manager`    | MANAGER     | DEV ↓ + MANAGER                      |
+| `admin`      | `admin`      | ADMIN       | MANAGER ↓ + ADMIN                    |
+| `superadmin` | `superadmin` | SUPER_ADMIN | 🔓 All Access (RoleHierarchy 최상위) |
+
+### Permission 기반 (v2)
+
+| Username      | Password      | Role            | 권한                                |
+| ------------- | ------------- | --------------- | ----------------------------------- |
+| `usermgr`     | `usermgr`     | USER_MANAGER    | USER:READ, USER:WRITE (DELETE 불가) |
+| `contentmgr`  | `contentmgr`  | CONTENT_MANAGER | POST:\*, COMMENT:READ/DELETE        |
+| `ordermgr`    | `ordermgr`    | ORDER_MANAGER   | ORDER:READ/WRITE/APPROVE            |
+| `analyst`     | `analyst`     | ANALYST         | 모든 리소스 READ + REPORT:EXPORT    |
+| `superadmin2` | `superadmin2` | SUPER_ADMIN     | 모든 권한 (16개)                    |
+| `multimgr`    | `multimgr`    | USER + CONTENT  | USER + POST + COMMENT 관리          |
 
 ## 📡 주요 API
 
@@ -51,7 +67,7 @@ POST /login
   "username": "admin",
   "password": "admin"
 }
-# Response: 
+# Response:
 # {
 #   "accessToken": "eyJhbG...",
 #   "refreshToken": "550e8400-e29b-41d4-a716-446655440000",
@@ -77,7 +93,9 @@ Authorization: Bearer <TOKEN>
 # 서버가 토큰 무효화 (진짜 로그아웃)
 ```
 
-### 테스트 API (역할별)
+### 테스트 API
+
+#### v1: Role 기반 (기존)
 
 ```bash
 GET /api/guest/welcome              # GUEST+
@@ -86,8 +104,33 @@ GET /api/dev/tools                  # DEV+
 GET /api/manager/team               # MANAGER+
 GET /api/admin/panel                # ADMIN+
 GET /api/superadmin/system          # SUPER_ADMIN
+```
 
-# 인증 헤더
+#### v2: Permission 기반
+
+```bash
+# USER 리소스
+GET    /api/v2/users                 # @PreAuthorize("hasPermission('USER', 'READ')")
+POST   /api/v2/users                 # @PreAuthorize("hasPermission('USER', 'WRITE')")
+DELETE /api/v2/users/{id}            # @PreAuthorize("hasPermission('USER', 'DELETE')")
+
+# POST 리소스
+GET    /api/v2/posts                 # @PreAuthorize("hasPermission('POST', 'READ')")
+POST   /api/v2/posts                 # @PreAuthorize("hasPermission('POST', 'WRITE')")
+DELETE /api/v2/posts/{id}            # @PreAuthorize("hasPermission('POST', 'DELETE')")
+
+# ORDER 리소스
+GET    /api/v2/orders                # @PreAuthorize("hasPermission('ORDER', 'READ')")
+POST   /api/v2/orders/{id}/approve   # @PreAuthorize("hasPermission('ORDER', 'APPROVE')")
+
+# REPORT 리소스
+GET    /api/v2/reports               # @PreAuthorize("hasPermission('REPORT', 'READ')")
+POST   /api/v2/reports/export        # @PreAuthorize("hasPermission('REPORT', 'EXPORT')")
+
+# 권한 확인
+GET    /api/v2/my-permissions        # 내 권한 목록 조회
+
+# 모든 API 공통 헤더
 Authorization: Bearer <JWT_TOKEN>
 ```
 
@@ -193,44 +236,75 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 ## 🔄 Refresh Token 패턴
 
-| 토큰              | 만료 시간 | 저장 위치 | 용도                          |
-| ----------------- | --------- | --------- | ----------------------------- |
-| **Access Token**  | 15분      | 클라이언트 | API 요청 인증                 |
-| **Refresh Token** | 7일       | DB        | Access Token 재발급           |
+| 토큰              | 만료 시간 | 저장 위치  | 용도                |
+| ----------------- | --------- | ---------- | ------------------- |
+| **Access Token**  | 15분      | 클라이언트 | API 요청 인증       |
+| **Refresh Token** | 7일       | DB         | Access Token 재발급 |
 
 **흐름:**
+
 1. 로그인 → Access Token (15분) + Refresh Token (7일) 발급
 2. API 요청 → Access Token 사용
 3. Access Token 만료 → `/refresh`로 재발급 (Refresh Token 제출)
 4. 로그아웃 → Refresh Token DB에서 삭제 → 재발급 불가
 
 **장점:**
+
 - Access Token 탈취되어도 15분만 유효
 - Refresh Token은 DB 저장 → 강제 무효화 가능
 - 로그아웃 시 Refresh Token 삭제 → 완전한 로그아웃
 
 ## 🔓 로그아웃 방식 비교
 
-| 특징              | 일반 로그아웃 (`/logout`)       | 블랙리스트 로그아웃 (`/logout/blacklist`)      |
-| ----------------- | ------------------------------- | ---------------------------------------------- |
-| **서버 처리**     | Refresh Token 삭제              | Access Token 블랙리스트 + Refresh Token 삭제   |
-| **Access Token**  | 만료 전까지 유효 (15분)         | 즉시 무효화                                    |
-| **Refresh Token** | 삭제됨 (재발급 불가)            | 삭제됨 (재발급 불가)                           |
-| **보안성**        | 중간 (최대 15분 위험)           | 높음 (즉시 차단)                               |
-| **성능**          | 빠름                            | 약간 느림 (블랙리스트 확인)                    |
-| **사용 케이스**   | 일반 웹사이트                   | 금융/관리자 시스템                             |
+| 특징              | 일반 로그아웃 (`/logout`) | 블랙리스트 로그아웃 (`/logout/blacklist`)    |
+| ----------------- | ------------------------- | -------------------------------------------- |
+| **서버 처리**     | Refresh Token 삭제        | Access Token 블랙리스트 + Refresh Token 삭제 |
+| **Access Token**  | 만료 전까지 유효 (15분)   | 즉시 무효화                                  |
+| **Refresh Token** | 삭제됨 (재발급 불가)      | 삭제됨 (재발급 불가)                         |
+| **보안성**        | 중간 (최대 15분 위험)     | 높음 (즉시 차단)                             |
+| **성능**          | 빠름                      | 약간 느림 (블랙리스트 확인)                  |
+| **사용 케이스**   | 일반 웹사이트             | 금융/관리자 시스템                           |
 
 **권장:** 일반 서비스는 `/logout` (Refresh Token 패턴으로 충분), 보안 중요 시 `/logout/blacklist` 사용
+
+## 🔑 Permission 기반 권한 시스템
+
+### 개념
+
+- **Resource**: 보호할 리소스 (USER, POST, ORDER, REPORT)
+- **Action**: 수행할 작업 (READ, WRITE, DELETE, APPROVE, EXPORT)
+- **Permission**: Resource + Action 조합 (예: USER:READ, POST:DELETE)
+
+### 구조
+
+```
+User → Role → Permission
+         ↓
+    USER_MANAGER → [USER:READ, USER:WRITE]
+```
+
+### 사용 예시
+
+```java
+// 사용자 삭제는 USER:DELETE 권한 필요
+@PreAuthorize("hasPermission('USER', 'DELETE')")
+public void deleteUser() { }
+
+// usermgr: USER:READ, USER:WRITE만 보유 → 403 Forbidden
+// superadmin2: 모든 권한 보유 → 200 OK
+```
 
 ## 📝 학습 포인트
 
 1. **JWT 인증 흐름**: 로그인 → JWT 발급 → 요청마다 검증
 2. **Refresh Token 패턴**: Access Token (15분) + Refresh Token (7일)으로 보안 강화
-3. **RoleHierarchy**: 상속 구조로 권한 관리 간소화
-4. **@PreAuthorize**: 메서드 레벨 세밀한 권한 제어
-5. **Stateless 아키텍처**: 세션 없이 JWT로 인증 유지 (부분적 Stateful: Refresh Token)
-6. **BCrypt**: 비밀번호 단방향 암호화
-7. **Token Blacklist**: 서버 측 토큰 무효화로 강제 로그아웃 구현
+3. **RoleHierarchy**: 상속 구조로 권한 관리 간소화 (v1)
+4. **Permission-Based Access Control**: Resource + Action 조합으로 세밀한 권한 제어 (v2)
+5. **@PreAuthorize**: 메서드 레벨 보안 (`hasRole` + `hasPermission`)
+6. **PermissionEvaluator**: 커스텀 권한 검증 로직
+7. **Stateless 아키텍처**: 세션 없이 JWT로 인증 유지 (부분적 Stateful: Refresh Token)
+8. **BCrypt**: 비밀번호 단방향 암호화
+9. **Token Blacklist**: 서버 측 토큰 무효화로 강제 로그아웃 구현
 
 ## 🔗 참고 링크
 

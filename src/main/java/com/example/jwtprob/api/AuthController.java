@@ -3,6 +3,7 @@ package com.example.jwtprob.api;
 import com.example.jwtprob.api.dto.AuthResponse;
 import com.example.jwtprob.api.dto.LoginRequest;
 import com.example.jwtprob.api.dto.SignupRequest;
+import com.example.jwtprob.security.BlacklistService;
 import com.example.jwtprob.security.JwtTokenProvider;
 import com.example.jwtprob.user.Role;
 import com.example.jwtprob.user.UserAccount;
@@ -15,9 +16,9 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -31,15 +32,18 @@ public class AuthController {
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final JwtTokenProvider jwtTokenProvider;
+    private final BlacklistService blacklistService;
 
     public AuthController(UserRepository userRepository,
             PasswordEncoder passwordEncoder,
             AuthenticationManager authenticationManager,
-            JwtTokenProvider jwtTokenProvider) {
+            JwtTokenProvider jwtTokenProvider,
+            BlacklistService blacklistService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.authenticationManager = authenticationManager;
         this.jwtTokenProvider = jwtTokenProvider;
+        this.blacklistService = blacklistService;
     }
 
     @PostMapping("/signup/guest")
@@ -91,6 +95,66 @@ public class AuthController {
         } catch (Exception e) {
             log.error("=== 로그인 실패: username={}, error={}", request.getUsername(), e.getMessage(), e);
             throw e;
+        }
+    }
+
+    /**
+     * 일반 로그아웃 (클라이언트 방식)
+     * - 서버는 단순히 성공 응답만 반환
+     * - 클라이언트에서 토큰을 삭제해야 함
+     * - 토큰은 만료 전까지 여전히 유효함 (보안 취약)
+     */
+    @PostMapping("/logout")
+    public ResponseEntity<?> logout(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            String token = authHeader.substring(7);
+            String username = jwtTokenProvider.getUsername(token);
+            log.info("=== 일반 로그아웃: username={}, 클라이언트에서 토큰 삭제 필요", username);
+        } else {
+            log.info("=== 일반 로그아웃: 토큰 없음");
+        }
+        
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "message", "로그아웃 성공 (클라이언트에서 토큰을 삭제하세요)",
+            "type", "CLIENT_LOGOUT"
+        ));
+    }
+
+    /**
+     * 블랙리스트 로그아웃 (서버 방식)
+     * - 서버가 토큰을 블랙리스트에 추가
+     * - 토큰이 즉시 무효화됨 (진짜 로그아웃)
+     * - 클라이언트도 토큰을 삭제해야 함
+     */
+    @PostMapping("/logout/blacklist")
+    public ResponseEntity<?> logoutWithBlacklist(@RequestHeader("Authorization") String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "message", "Authorization 헤더가 필요합니다"
+            ));
+        }
+
+        String token = authHeader.substring(7);
+        String username = jwtTokenProvider.getUsername(token);
+        
+        try {
+            blacklistService.addToBlacklist(token, "LOGOUT");
+            log.info("=== 블랙리스트 로그아웃 성공: username={}", username);
+            
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "로그아웃 성공 (토큰이 무효화되었습니다)",
+                "type", "BLACKLIST_LOGOUT",
+                "username", username
+            ));
+        } catch (Exception e) {
+            log.error("=== 블랙리스트 로그아웃 실패: username={}, error={}", username, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                "success", false,
+                "message", "로그아웃 처리 중 오류가 발생했습니다"
+            ));
         }
     }
 

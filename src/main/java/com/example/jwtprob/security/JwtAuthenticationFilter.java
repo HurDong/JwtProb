@@ -24,9 +24,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
     private final JwtTokenProvider jwtTokenProvider;
+    private final BlacklistService blacklistService;
 
-    public JwtAuthenticationFilter(JwtTokenProvider jwtTokenProvider) {
+    public JwtAuthenticationFilter(JwtTokenProvider jwtTokenProvider, BlacklistService blacklistService) {
         this.jwtTokenProvider = jwtTokenProvider;
+        this.blacklistService = blacklistService;
     }
 
     @Override
@@ -39,6 +41,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String token = authHeader.substring(7);
             log.info("=== JWT 토큰 발견: uri={}, token length={}", requestURI, token.length());
+
+            // 블랙리스트 검증
+            if (blacklistService.isBlacklisted(token)) {
+                log.warn("=== 블랙리스트에 등록된 토큰: uri={}", requestURI);
+                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                response.getWriter().write("{\"error\":\"Token has been blacklisted\"}");
+                response.setContentType("application/json");
+                return;
+            }
 
             if (jwtTokenProvider.validateToken(token)) {
                 String username = jwtTokenProvider.getUsername(token);
